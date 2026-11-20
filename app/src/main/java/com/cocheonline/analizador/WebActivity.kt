@@ -3,7 +3,9 @@ package com.cocheonline.analizador
 import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
+import android.net.http.SslError
 import android.os.Bundle
 import android.webkit.*
 import android.widget.EditText
@@ -16,7 +18,7 @@ import org.json.JSONObject
 class WebActivity : AppCompatActivity() {
     private lateinit var web: WebView
     private var pendingText: String? = null
-    private var loaded = false
+    private var showingError = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(b: Bundle?) {
@@ -26,11 +28,22 @@ class WebActivity : AppCompatActivity() {
         web.settings.apply { javaScriptEnabled = true; domStorageEnabled = true; mediaPlaybackRequiresUserGesture = true }
         web.webChromeClient = WebChromeClient()
         web.webViewClient = object : WebViewClient() {
-            override fun onPageFinished(v: WebView, url: String) { loaded = true; deliver() }
+            override fun onPageStarted(v: WebView, url: String, f: Bitmap?) { showingError = false }
+            override fun onPageFinished(v: WebView, url: String) { if (!showingError) deliver() }
             override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
                 val base = Prefs.baseUrl(this@WebActivity)
                 if (r.url.toString().startsWith(base)) return false
                 startActivity(Intent(Intent.ACTION_VIEW, r.url)); return true
+            }
+            override fun onReceivedError(v: WebView, r: WebResourceRequest, e: WebResourceError) {
+                if (r.isForMainFrame) showError("No se pudo abrir el servidor.", e.description.toString(), r.url.toString())
+            }
+            override fun onReceivedHttpError(v: WebView, r: WebResourceRequest, e: WebResourceResponse) {
+                if (r.isForMainFrame && e.statusCode >= 400 && e.statusCode != 401) showError("El servidor respondió con error " + e.statusCode, e.reasonPhrase ?: "", r.url.toString())
+            }
+            override fun onReceivedSslError(v: WebView, h: SslErrorHandler, e: SslError) {
+                h.cancel()
+                showError("El certificado HTTPS no es válido.", "Usa una dirección https con certificado de confianza (por ejemplo un túnel de Cloudflare).", e.url ?: "")
             }
             override fun onReceivedHttpAuthRequest(v: WebView, h: HttpAuthHandler, host: String, realm: String?) {
                 val saved = web.getHttpAuthUsernamePassword(host, realm ?: "")
@@ -41,6 +54,16 @@ class WebActivity : AppCompatActivity() {
         handle(intent)
     }
 
+    private fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    private fun showError(title: String, detail: String, url: String) {
+        showingError = true
+        val html = "<html><body style='font-family:sans-serif;padding:24px'><h2>" + esc(title) + "</h2><p>" + esc(detail) +
+            "</p><p style='color:#666;word-break:break-all'>" + esc(url) + "</p>" +
+            "<p>Comprueba la dirección en la app (debe ser accesible desde el móvil, no localhost), que el servidor esté encendido y que tengas conexión.</p></body></html>"
+        web.loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
+    }
+
     override fun onNewIntent(i: Intent) { super.onNewIntent(i); setIntent(i); handle(i) }
 
     private fun handle(i: Intent) {
@@ -48,7 +71,6 @@ class WebActivity : AppCompatActivity() {
         if (base.isEmpty()) { Toast.makeText(this, "Configura primero la dirección del servidor", Toast.LENGTH_LONG).show(); startActivity(Intent(this, MainActivity::class.java)); finish(); return }
         val screen = i.getStringExtra("screenText")
         val shared = if (i.action == Intent.ACTION_SEND) i.getStringExtra(Intent.EXTRA_TEXT) else null
-        loaded = false
         when {
             screen != null -> { pendingText = screen; web.loadUrl(base + "index.html?native=1") }
             shared != null -> web.loadUrl(base + "index.html?native=1&text=" + Uri.encode(shared))
@@ -74,7 +96,7 @@ class WebActivity : AppCompatActivity() {
         val u = EditText(this).apply { hint = "Usuario"; setSingleLine() }
         val p = EditText(this).apply { hint = "Contraseña"; setSingleLine(); inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD }
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(pad, pad / 2, pad, 0); addView(u); addView(p) }
-        AlertDialog.Builder(this).setTitle("Acceso a $host").setView(box)
+        AlertDialog.Builder(this).setTitle("Acceso a " + host).setView(box)
             .setPositiveButton("Entrar") { _, _ ->
                 web.setHttpAuthUsernamePassword(host, realm ?: "", u.text.toString(), p.text.toString())
                 h.proceed(u.text.toString(), p.text.toString())
