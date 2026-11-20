@@ -1,0 +1,3 @@
+<resources>
+    <string name="acc_desc">Muestra un botón flotante sobre las apps de anuncios de coches. Al pulsarlo lee el texto visible del anuncio y lo envía a tu servidor para evaluarlo. No lee contraseñas ni se usa en otras apps.</string>
+</resources>
