@@ -20,7 +20,6 @@ class BubbleService : AccessibilityService() {
     private var wm: WindowManager? = null
     private var bubble: View? = null
     private var currentPkg = ""
-    /** Líneas vistas en esta ficha (así también cuenta lo que ya has desplazado fuera de pantalla). */
     private val seen = LinkedHashSet<String>()
 
     override fun onServiceConnected() { wm = getSystemService(WINDOW_SERVICE) as WindowManager }
@@ -28,9 +27,8 @@ class BubbleService : AccessibilityService() {
     override fun onAccessibilityEvent(e: AccessibilityEvent) {
         val pkg = e.packageName?.toString() ?: return
         if (pkg == packageName || pkg.startsWith("com.android.systemui")) return
-        if (e.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg != currentPkg) { seen.clear() }
         if (pkg != currentPkg) currentPkg = pkg
-        if (matches(pkg)) { showBubble(); if (e.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) collect() } else hideBubble()
+        if (matches(pkg)) showBubble() else hideBubble()
     }
 
     override fun onInterrupt() {}
@@ -41,13 +39,12 @@ class BubbleService : AccessibilityService() {
         return Prefs.keywords(this).split(",").map { it.trim().lowercase() }.filter { it.isNotEmpty() }.any { pkg.lowercase().contains(it) }
     }
 
-    private fun collect(): Int {
-        val root = rootInActiveWindow ?: return seen.size
-        if (root.packageName?.toString() != currentPkg) return seen.size
+    private fun collect() {
+        val root = rootInActiveWindow ?: return
+        if (root.packageName?.toString() != currentPkg) return
         val acc = ArrayList<String>()
         walk(root, acc, 0)
         for (l in acc) if (seen.size < 400) seen.add(l)
-        return seen.size
     }
 
     private fun walk(n: AccessibilityNodeInfo?, out: MutableList<String>, depth: Int) {
@@ -60,6 +57,7 @@ class BubbleService : AccessibilityService() {
     }
 
     private fun analyze() {
+        seen.clear() // solo lo que se ve ahora: así no se mezcla con anuncios anteriores
         collect()
         if (seen.isEmpty()) { Toast.makeText(this, "No veo texto en pantalla. Abre la ficha del coche.", Toast.LENGTH_LONG).show(); return }
         val text = seen.joinToString("\n")
